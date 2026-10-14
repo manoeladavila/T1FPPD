@@ -1,3 +1,5 @@
+//V2
+
 //com sincronização excessiva
 //a mesa toda vai ser um mutes (seção crítica) e só um filósofo come por vez
 //é diferente da v0 (sequencial) pq os filosofos ainda pensam concorrente
@@ -11,6 +13,31 @@ import (
 
 // var forks [5]sync.Mutex   (não precisamos de garfos, a mesa toda é um mutex agr)
 var table sync.Mutex
+var waitTotal [5]time.Duration
+var maxWait [5]time.Duration
+var eatStart, eatEnd [5][]time.Time
+var cycles [5]int
+
+// maior número de refeições que estavam em andamento ao mesmo tempo
+func maxEatingSimultaneously() int {
+	best := 0
+	for i := range eatStart {
+		for _, s := range eatStart[i] {
+			count := 0
+			for j := range eatStart {
+				for k := range eatStart[j] {
+					if !eatStart[j][k].After(s) && eatEnd[j][k].After(s) {
+						count++
+					}
+				}
+			}
+			if count > best {
+				best = count
+			}
+		}
+	}
+	return best
+}
 
 func Philosopher(id, iteration int) {
 	time_to_think := 2
@@ -21,9 +48,16 @@ func Philosopher(id, iteration int) {
 		fmt.Printf(" ")
 	}
 	fmt.Printf(" T%d\n", iteration)
-	time.Sleep(time.Duration(time_to_think) * time.Second)
+	time.Sleep(time.Duration(time_to_think) * time.Millisecond)
 
+	start := time.Now()
 	table.Lock()
+	end := time.Since(start)
+	waitTotal[id] += end
+	if end > maxWait[id] {
+		maxWait[id] = end
+	}
+	eatStart[id] = append(eatStart[id], time.Now())
 
 	/* * pega o garfo esquerdo e dps o direito
 	left := id
@@ -38,17 +72,21 @@ func Philosopher(id, iteration int) {
 		fmt.Printf(" ")
 	}
 	fmt.Printf(" E%d\n", iteration)
-	time.Sleep(time.Duration(time_to_eat) * time.Second)
+	time.Sleep(time.Duration(time_to_eat) * time.Millisecond)
+
+	eatEnd[id] = append(eatEnd[id], time.Now())
 
 	/*forks[right].Unlock()  //* devolve o garfo diretiro e dps o esquerdo
 	forks[left].Unlock() */
 
 	table.Unlock()
+
+	cycles[id]++
 }
 
 func main() {
 	philosophers := 5
-	rounds := 5
+	rounds := 20
 
 	fmt.Println("\n[P1] [P2] [P3] [P4] [P5]\n")
 
@@ -57,7 +95,7 @@ func main() {
 	start := time.Now()
 
 	var wg sync.WaitGroup
-	for j := 0; j < philosophers; j++ {  // for faz uma goraoutine por filosofo
+	for j := 0; j < philosophers; j++ { // for faz uma goraoutine por filosofo
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -70,9 +108,19 @@ func main() {
 
 	elapsed := time.Since(start)
 
+	var total, maxW time.Duration
+	for i := 0; i < philosophers; i++ {
+		total += waitTotal[i]
+		if maxWait[i] > maxW {
+			maxW = maxWait[i]
+		}
+	}
+	fmt.Printf("\nEspera média pelos garfos: %s\n", total/time.Duration(philosophers*rounds))
+	fmt.Printf("Maior espera: %s\n", maxW)
+	fmt.Printf("Máx. comendo simultaneamente: %d\n", maxEatingSimultaneously())
+	fmt.Printf("Ciclos concluídos: F0=%d F1=%d F2=%d F3=%d F4=%d\n", cycles[0], cycles[1], cycles[2], cycles[3], cycles[4])
+
 	fmt.Printf("\nConcurrent Dinner took %s\n\n", elapsed)
 }
-
-
 
 //interprentando os resultados, cada filósof entra no mutex come e volta a pensar, T2 é sempre imeddiatamente depois de E1

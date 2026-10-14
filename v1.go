@@ -1,62 +1,117 @@
-// Os filósofos podem entrar em deadlock
+//V1
 
 package main
 
 import (
-     "fmt"
-     "sync" // *
-     "time"
+	"fmt"
+	"sync"
+	"time"
 )
 
-var forks [5]sync.Mutex // * um mutex por garfo
+var forks [5]sync.Mutex
+var waitTotal [5]time.Duration
+var maxWait [5]time.Duration
+var eatStart, eatEnd [5][]time.Time
+var cycles [5]int
+
+// maior número de refeições que estavam em andamento ao mesmo tempo
+func maxEatingSimultaneously() int {
+	best := 0
+	for i := range eatStart {
+		for _, s := range eatStart[i] {
+			count := 0
+			for j := range eatStart {
+				for k := range eatStart[j] {
+					if !eatStart[j][k].After(s) && eatEnd[j][k].After(s) {
+						count++
+					}
+				}
+			}
+			if count > best {
+				best = count
+			}
+		}
+	}
+	return best
+}
 
 func Philosopher(id, iteration int) {
-     time_to_think := 2
-     time_to_eat := 3
+	time_to_think := 2
+	time_to_eat := 3
 
-     // think
-     for s := 1; s <= id*6; s++ {
-          fmt.Printf(" ")
-          }
-     fmt.Printf(" T%d\n", iteration) // Thinking
-     time.Sleep(time.Duration(time_to_think) * time.Second)
+	// think
+	for s := 1; s <= id*6; s++ {
+		fmt.Printf(" ")
+	}
+	fmt.Printf(" T%d\n", iteration)
+	time.Sleep(time.Duration(time_to_think) * time.Millisecond)
 
-     // * pega o garfo esquerdo e depois o direito
-     left := id
-     right := (id + 1) % 5
-     forks[left].Lock()
-     time.Sleep(100 * time.Millisecond) // * garante que o deadlock aconteça, espera circular
-     forks[right].Lock()
+	// * pega o garfo esquerdo e dps o direito
+	left := id
+	right := (id + 1) % 5 // pq o filosofo 4 tem que pegar o garfo 0 (4+1%5)
 
-     // eat
+	start := time.Now()
+	forks[left].Lock()
+	// time.Sleep(100 * time.Millisecond) //* força que o deadlock aconteça, espara circular, pq todos os filosofos vao pegar o garfo da esquerda primeiro
+	forks[right].Lock()
+	end := time.Since(start)
+	waitTotal[id] += end
+	if end > maxWait[id] {
+		maxWait[id] = end
+	}
+	eatStart[id] = append(eatStart[id], time.Now())
 
-     for s := 1; s <= id*6; s++ {
-          fmt.Printf(" ")
-          }
-     fmt.Printf(" E%d\n", iteration) // Eating// V1 - Versão concorrente sujeita a deadlock
+	// eat
 
+	for s := 1; s <= id*6; s++ {
+		fmt.Printf(" ")
+	}
+	fmt.Printf(" E%d\n", iteration)
+	time.Sleep(time.Duration(time_to_eat) * time.Millisecond)
+
+	eatEnd[id] = append(eatEnd[id], time.Now())
+
+	forks[right].Unlock() //* devolve o garfo diretiro e dps o esquerdo
+	forks[left].Unlock()
+
+	cycles[id]++
+}
 
 func main() {
-	rounds := 5
+	philosophers := 5
+	rounds := 20
 
 	fmt.Println("\n[P1] [P2] [P3] [P4] [P5]\n")
 
-	var wg sync.WaitGroup
+	// run philosophers
+
 	start := time.Now()
 
-	for i := 0; i < N; i++ {
+	var wg sync.WaitGroup
+	for j := 0; j < philosophers; j++ { // for faz uma goraoutine por filosofo
 		wg.Add(1)
-		go Philosopher(i, rounds, &wg)
+		go func(id int) {
+			defer wg.Done()
+			for i := 1; i <= rounds; i++ {
+				Philosopher(id, i)
+			}
+		}(j)
 	}
+	wg.Wait() // espera todos terminatrem
 
-	wg.Wait() // espera todos terminarem
 	elapsed := time.Since(start)
 
-	fmt.Printf("\nConcurrent Dinner took %s\n\n", elapsed)
-}
-     time.Sleep(time.Duration(time_to_eat) * time.Second)
+	var total, maxW time.Duration
+	for i := 0; i < philosophers; i++ {
+		total += waitTotal[i]
+		if maxWait[i] > maxW {
+			maxW = maxWait[i]
+		}
+	}
+	fmt.Printf("\nEspera média pelos garfos: %s\n", total/time.Duration(philosophers*rounds))
+	fmt.Printf("Maior espera: %s\n", maxW)
+	fmt.Printf("Máx. comendo simultaneamente: %d\n", maxEatingSimultaneously())
+	fmt.Printf("Ciclos concluídos: F0=%d F1=%d F2=%d F3=%d F4=%d\n", cycles[0], cycles[1], cycles[2], cycles[3], cycles[4])
 
-     // NOVO: devolve os garfos
-     forks[right].Unlock()
-     forks[left].Unlock()
+	fmt.Printf("\nConcurrent Dinner took %s\n\n", elapsed)
 }
